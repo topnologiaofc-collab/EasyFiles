@@ -6,6 +6,22 @@
   let overlayRoot = null;
   let carouselOffset = 0;
 
+  const mergeRecentItems = async (incomingItems) => {
+    if (!incomingItems.length) {
+      return;
+    }
+
+    const current = await loadRecentFiles();
+    const merged = [...incomingItems, ...current].reduce((acc, item) => {
+      if (!acc.some((entry) => entry.id === item.id)) {
+        acc.push(item);
+      }
+      return acc;
+    }, []);
+
+    await saveRecentFiles(merged);
+  };
+
   const loadRecentFiles = async () => {
     const stored = await chrome.storage.local.get(STORAGE_KEY);
     return Array.isArray(stored[STORAGE_KEY]) ? stored[STORAGE_KEY] : [];
@@ -128,6 +144,29 @@
           background-size: cover;
           background-position: center;
           overflow: hidden;
+          display: grid;
+          place-items: end center;
+          position: relative;
+        }
+
+        .easy-files-drop::before {
+          content: '';
+          position: absolute;
+          inset: 0;
+          background: linear-gradient(180deg, rgba(17, 20, 48, 0.1) 0%, rgba(17, 20, 48, 0.76) 100%);
+        }
+
+        .easy-files-drop-label {
+          position: relative;
+          z-index: 1;
+          margin: 0 8px 8px;
+          font-size: 0.67rem;
+          color: #f2f4ff;
+          background: rgba(17, 20, 48, 0.75);
+          border: 1px solid rgba(198, 206, 242, 0.28);
+          border-radius: 6px;
+          padding: 4px 6px;
+          text-align: center;
         }
 
         .easy-files-right {
@@ -250,7 +289,9 @@
         <div class="easy-files-content">
           <div>
             <h3 class="easy-files-transfer-title">Área de Transferência</h3>
-            <div class="easy-files-drop"></div>
+            <div class="easy-files-drop" title="Pressione Ctrl+V para colar">
+              <p class="easy-files-drop-label">Ctrl+V aqui</p>
+            </div>
           </div>
           <div class="easy-files-right">
             <h3 class="easy-files-recent-title">Transferido</h3>
@@ -315,6 +356,11 @@
 
     window.addEventListener('resize', positionOverlay);
     window.addEventListener('scroll', positionOverlay, true);
+    document.addEventListener('paste', (event) => {
+      handleClipboardPaste(event).catch(() => {
+        // Ignore clipboard read issues to avoid breaking host pages.
+      });
+    }, true);
 
     return overlayRoot;
   };
@@ -400,6 +446,54 @@
     updateCarouselPosition();
   };
 
+  const updateTransferArea = (file) => {
+    const drop = overlayRoot?.querySelector('.easy-files-drop');
+    if (!drop) {
+      return;
+    }
+
+    const baseUrl = chrome.runtime.getURL('assets/easy-files-hero.svg');
+    if (!file) {
+      drop.style.backgroundImage = `url("${baseUrl}")`;
+      drop.querySelector('.easy-files-drop-label').textContent = 'Ctrl+V aqui';
+      return;
+    }
+
+    if (typeof file.type === 'string' && file.type.startsWith('image/')) {
+      const objectUrl = URL.createObjectURL(file);
+      drop.style.backgroundImage = `url("${objectUrl}")`;
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 3500);
+    } else {
+      drop.style.backgroundImage = `url("${baseUrl}")`;
+    }
+
+    drop.querySelector('.easy-files-drop-label').textContent = file.name;
+  };
+
+  const handleClipboardPaste = async (event) => {
+    if (!overlayRoot || overlayRoot.style.display !== 'block' || !currentInput) {
+      return;
+    }
+
+    const clipboardItems = Array.from(event.clipboardData?.items || []);
+    const files = clipboardItems
+      .filter((item) => item.kind === 'file')
+      .map((item) => item.getAsFile())
+      .filter(Boolean);
+
+    if (!files.length) {
+      return;
+    }
+
+    event.preventDefault();
+
+    const mapped = await Promise.all(files.map(fileToRecentItem));
+    await mergeRecentItems(mapped);
+    carouselOffset = 0;
+    updateTransferArea(files[0]);
+    await renderRecentFiles();
+  };
+
   const positionOverlay = () => {
     if (!currentInput || !overlayRoot || overlayRoot.style.display !== 'block') {
       return;
@@ -433,8 +527,10 @@
   const openOverlayForInput = async (input) => {
     currentInput = input;
     carouselOffset = 0;
+    ensureOverlayRoot();
+    updateTransferArea();
     await renderRecentFiles();
-    ensureOverlayRoot().style.display = 'block';
+    overlayRoot.style.display = 'block';
     positionOverlay();
   };
 
@@ -452,16 +548,7 @@
     }
 
     const mapped = await Promise.all(Array.from(input.files).map(fileToRecentItem));
-    const current = await loadRecentFiles();
-
-    const merged = [...mapped, ...current].reduce((acc, item) => {
-      if (!acc.some((entry) => entry.id === item.id)) {
-        acc.push(item);
-      }
-      return acc;
-    }, []);
-
-    await saveRecentFiles(merged);
+    await mergeRecentItems(mapped);
   };
 
   document.addEventListener('click', (event) => {
