@@ -1,13 +1,13 @@
 # Easy Files Chrome Extension
 
-A dark-gray, Opera GX-inspired file upload assistant.
+A dark-gray, Opera GX-inspired upload helper that opens an anchored overlay (not fullscreen popup) when clicking file inputs.
 
 ## What it does
 
-- Replaces native file input click behavior with an **Easy Files** pop-up.
-- Shows a custom hero image in the pop-up.
-- Stores and displays your recent files.
-- Lets you quickly re-select recent files in one click.
+- Replaces native file input clicks with an **anchored popover overlay** near the input field.
+- Uses a transfer area + horizontal recent-files strip inspired by Opera GX style.
+- Stores and displays recent files with quick one-click re-selection.
+- Includes controls for "Mostrar todos os arquivos" and clearing recent files.
 
 ## Install locally
 

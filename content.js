@@ -1,9 +1,10 @@
 (() => {
-  const MAX_RECENT_FILES = 8;
+  const MAX_RECENT_FILES = 10;
   const STORAGE_KEY = 'easyFilesRecentItems';
 
   let currentInput = null;
-  let modalRoot = null;
+  let overlayRoot = null;
+  let carouselOffset = 0;
 
   const loadRecentFiles = async () => {
     const stored = await chrome.storage.local.get(STORAGE_KEY);
@@ -39,216 +40,240 @@
     }
 
     const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    let unitIndex = 0;
     let value = bytes;
+    let unit = 0;
 
-    while (value >= 1024 && unitIndex < units.length - 1) {
+    while (value >= 1024 && unit < units.length - 1) {
       value /= 1024;
-      unitIndex += 1;
+      unit += 1;
     }
 
-    return `${value.toFixed(value >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+    return `${value.toFixed(value >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
   };
 
-  const extFromName = (name) => {
-    const parts = name.split('.');
-    return parts.length > 1 ? parts.pop().toUpperCase() : 'FILE';
-  };
-
-  const ensureModalRoot = () => {
-    if (modalRoot) {
-      return modalRoot;
+  const ensureOverlayRoot = () => {
+    if (overlayRoot) {
+      return overlayRoot;
     }
 
-    modalRoot = document.createElement('div');
-    modalRoot.className = 'easy-files-root';
-    modalRoot.innerHTML = `
+    overlayRoot = document.createElement('div');
+    overlayRoot.className = 'easy-files-root';
+    overlayRoot.innerHTML = `
       <style>
         .easy-files-root {
           position: fixed;
-          inset: 0;
           z-index: 2147483646;
           display: none;
-          align-items: center;
-          justify-content: center;
           font-family: Inter, Segoe UI, Roboto, sans-serif;
           color: #ebeffa;
-        }
-
-        .easy-files-backdrop {
-          position: absolute;
-          inset: 0;
-          background: rgba(8, 11, 18, 0.72);
-          backdrop-filter: blur(5px);
+          width: min(760px, calc(100vw - 20px));
         }
 
         .easy-files-panel {
-          position: relative;
-          width: min(900px, calc(100vw - 32px));
-          max-height: min(720px, calc(100vh - 32px));
-          background: linear-gradient(180deg, #252a36 0%, #181c25 100%);
-          border: 1px solid rgba(151, 166, 196, 0.2);
-          border-radius: 20px;
-          box-shadow: 0 24px 66px rgba(0, 0, 0, 0.5);
+          border: 1px solid rgba(145, 160, 207, 0.28);
+          border-radius: 14px;
+          background: #211f4a;
+          box-shadow: 0 24px 46px rgba(0, 0, 0, 0.45);
+          padding: 16px;
+          display: grid;
+          gap: 14px;
+        }
+
+        .easy-files-topbar {
+          display: flex;
+          align-items: center;
+          justify-content: flex-end;
+          gap: 8px;
+          margin-bottom: -8px;
+        }
+
+        .easy-files-action {
+          border: none;
+          background: transparent;
+          color: #ccd3ff;
+          font-size: 16px;
+          cursor: pointer;
+          width: 24px;
+          height: 24px;
+          border-radius: 999px;
+        }
+
+        .easy-files-action:hover {
+          background: rgba(255, 255, 255, 0.1);
+        }
+
+        .easy-files-content {
+          display: grid;
+          grid-template-columns: 168px 1fr;
+          gap: 16px;
+        }
+
+        .easy-files-transfer-title,
+        .easy-files-recent-title {
+          margin: 0 0 8px;
+          font-size: 0.8rem;
+          font-weight: 700;
+          color: #f0f2ff;
+          letter-spacing: 0.03em;
+          text-transform: uppercase;
+        }
+
+        .easy-files-drop {
+          width: 128px;
+          height: 128px;
+          border-radius: 8px;
+          border: 1px solid rgba(198, 206, 242, 0.34);
+          background: #d6d7de;
+          background-image: url("${chrome.runtime.getURL('assets/easy-files-hero.svg')}");
+          background-size: cover;
+          background-position: center;
           overflow: hidden;
-          display: flex;
-          flex-direction: column;
         }
 
-        .easy-files-header {
-          padding: 18px 22px;
-          border-bottom: 1px solid rgba(151, 166, 196, 0.15);
-          display: flex;
+        .easy-files-right {
+          min-width: 0;
+          display: grid;
+          gap: 12px;
+        }
+
+        .easy-files-carousel-row {
+          display: grid;
+          grid-template-columns: 28px 1fr 28px;
           align-items: center;
-          justify-content: space-between;
-          background: rgba(8, 11, 18, 0.25);
+          gap: 8px;
         }
 
-        .easy-files-title {
-          margin: 0;
-          font-size: 1.1rem;
-          font-weight: 650;
-          color: #f0f4ff;
-        }
-
-        .easy-files-close {
+        .easy-files-nav {
           border: none;
-          background: rgba(255, 255, 255, 0.08);
-          color: #d9e2f5;
-          border-radius: 999px;
-          width: 34px;
+          border-radius: 8px;
+          background: transparent;
+          color: #c4cbff;
+          font-size: 20px;
+          cursor: pointer;
           height: 34px;
-          cursor: pointer;
-          font-size: 18px;
         }
 
-        .easy-files-body {
-          padding: 18px 22px 24px;
-          overflow: auto;
-          display: grid;
-          gap: 18px;
+        .easy-files-nav:disabled {
+          opacity: 0.35;
+          cursor: not-allowed;
         }
 
-        .easy-files-hero {
-          width: 100%;
-          border-radius: 15px;
-          border: 1px solid rgba(151, 166, 196, 0.22);
+        .easy-files-track {
+          overflow: hidden;
         }
 
-        .easy-files-actions {
+        .easy-files-list {
           display: flex;
-          align-items: center;
+          align-items: stretch;
           gap: 12px;
-          flex-wrap: wrap;
-        }
-
-        .easy-files-btn {
-          border: none;
-          border-radius: 999px;
-          padding: 10px 16px;
-          font-weight: 600;
-          cursor: pointer;
-        }
-
-        .easy-files-btn-primary {
-          color: #141925;
-          background: linear-gradient(90deg, #7af9c6 0%, #6ea0ff 100%);
-        }
-
-        .easy-files-btn-muted {
-          background: rgba(255, 255, 255, 0.08);
-          color: #d9e2f5;
-        }
-
-        .easy-files-section-title {
-          margin: 0;
-          font-size: 0.96rem;
-          font-weight: 620;
-          color: #c9d5f0;
-        }
-
-        .easy-files-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-          gap: 12px;
+          transition: transform 180ms ease;
+          will-change: transform;
         }
 
         .easy-files-card {
-          border: 1px solid rgba(151, 166, 196, 0.2);
-          background: rgba(7, 10, 16, 0.42);
-          border-radius: 12px;
-          padding: 12px;
-          display: grid;
-          gap: 8px;
+          min-width: 128px;
+          max-width: 128px;
+          border: none;
+          background: transparent;
+          color: #f5f7ff;
+          text-align: left;
           cursor: pointer;
-          transition: transform 120ms ease, border-color 120ms ease;
+          padding: 0;
         }
 
-        .easy-files-card:hover {
-          border-color: rgba(122, 249, 198, 0.6);
-          transform: translateY(-1px);
+        .easy-files-thumb {
+          width: 128px;
+          height: 92px;
+          border-radius: 8px;
+          object-fit: cover;
+          background: #14152f;
+          border: 1px solid rgba(198, 206, 242, 0.2);
         }
 
-        .easy-files-ext {
-          font-size: 0.7rem;
+        .easy-files-fallback {
+          width: 128px;
+          height: 92px;
+          border-radius: 8px;
+          background: linear-gradient(180deg, #3a3f7e 0%, #22265a 100%);
+          display: grid;
+          place-items: center;
           font-weight: 700;
-          letter-spacing: 0.05em;
-          color: #141925;
-          background: linear-gradient(90deg, #77f8c5 0%, #759eff 100%);
-          width: fit-content;
-          border-radius: 999px;
-          padding: 4px 8px;
+          color: #e6e9ff;
+          border: 1px solid rgba(198, 206, 242, 0.2);
         }
 
         .easy-files-name {
-          font-size: 0.87rem;
-          line-height: 1.3;
-          color: #ecf2ff;
-          word-break: break-word;
+          margin-top: 6px;
+          font-size: 0.83rem;
+          line-height: 1.25;
+          color: #e5eaff;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
 
         .easy-files-meta {
-          font-size: 0.74rem;
-          color: #a7b4ce;
+          margin-top: 2px;
+          font-size: 0.72rem;
+          color: #a9b0df;
+        }
+
+        .easy-files-footer {
+          display: flex;
+          justify-content: center;
+          gap: 8px;
+          margin-top: 2px;
+        }
+
+        .easy-files-btn {
+          border: 1px solid rgba(97, 114, 255, 0.65);
+          border-radius: 8px;
+          padding: 10px 18px;
+          color: #e7ecff;
+          background: linear-gradient(180deg, #313bff 0%, #2217bd 100%);
+          font-weight: 600;
+          cursor: pointer;
+          box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
         }
 
         .easy-files-empty {
-          border: 1px dashed rgba(151, 166, 196, 0.32);
-          border-radius: 12px;
-          padding: 20px;
-          text-align: center;
-          color: #a7b4ce;
-          background: rgba(8, 11, 18, 0.3);
+          color: #b3bbe9;
+          font-size: 0.9rem;
+          padding: 8px;
         }
       </style>
-      <div class="easy-files-backdrop"></div>
-      <div class="easy-files-panel" role="dialog" aria-modal="true" aria-label="Easy Files">
-        <div class="easy-files-header">
-          <h2 class="easy-files-title">Easy Files</h2>
-          <button class="easy-files-close" type="button" aria-label="Close">×</button>
+      <div class="easy-files-panel" role="dialog" aria-label="Easy Files anchored overlay">
+        <div class="easy-files-topbar">
+          <button class="easy-files-action" type="button" data-action="clear" title="Clear recent files">⟳</button>
+          <button class="easy-files-action" type="button" data-action="close" title="Close">×</button>
         </div>
-        <div class="easy-files-body">
-          <img class="easy-files-hero" alt="Easy Files banner" />
-          <div class="easy-files-actions">
-            <button class="easy-files-btn easy-files-btn-primary" type="button" data-action="choose">Choose from device</button>
-            <button class="easy-files-btn easy-files-btn-muted" type="button" data-action="clear">Clear recent files</button>
+        <div class="easy-files-content">
+          <div>
+            <h3 class="easy-files-transfer-title">Área de Transferência</h3>
+            <div class="easy-files-drop"></div>
           </div>
-          <h3 class="easy-files-section-title">Recent Files</h3>
-          <div class="easy-files-grid"></div>
+          <div class="easy-files-right">
+            <h3 class="easy-files-recent-title">Transferido</h3>
+            <div class="easy-files-carousel-row">
+              <button class="easy-files-nav" type="button" data-action="prev">‹</button>
+              <div class="easy-files-track"><div class="easy-files-list"></div></div>
+              <button class="easy-files-nav" type="button" data-action="next">›</button>
+            </div>
+          </div>
+        </div>
+        <div class="easy-files-footer">
+          <button class="easy-files-btn" type="button" data-action="choose">Mostrar todos os arquivos</button>
         </div>
       </div>
     `;
 
-    document.documentElement.appendChild(modalRoot);
+    document.documentElement.appendChild(overlayRoot);
 
-    modalRoot.querySelector('.easy-files-hero').src = chrome.runtime.getURL('assets/easy-files-hero.svg');
+    overlayRoot.querySelector('[data-action="close"]').addEventListener('click', closeOverlay);
 
-    modalRoot.querySelector('.easy-files-backdrop').addEventListener('click', closeModal);
-    modalRoot.querySelector('.easy-files-close').addEventListener('click', closeModal);
-
-    modalRoot.querySelector('[data-action="choose"]').addEventListener('click', async () => {
+    overlayRoot.querySelector('[data-action="choose"]').addEventListener('click', () => {
       const target = currentInput;
-      closeModal();
+      closeOverlay();
       if (!target) {
         return;
       }
@@ -257,32 +282,82 @@
       delete target.dataset.easyFilesBypass;
     });
 
-    modalRoot.querySelector('[data-action="clear"]').addEventListener('click', async () => {
+    overlayRoot.querySelector('[data-action="clear"]').addEventListener('click', async () => {
       await saveRecentFiles([]);
+      carouselOffset = 0;
       await renderRecentFiles();
     });
 
+    overlayRoot.querySelector('[data-action="prev"]').addEventListener('click', () => {
+      carouselOffset = Math.max(0, carouselOffset - 1);
+      updateCarouselPosition();
+    });
+
+    overlayRoot.querySelector('[data-action="next"]').addEventListener('click', () => {
+      carouselOffset += 1;
+      updateCarouselPosition();
+    });
+
     document.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape' && modalRoot && modalRoot.style.display === 'flex') {
-        closeModal();
+      if (event.key === 'Escape' && overlayRoot.style.display === 'block') {
+        closeOverlay();
       }
     });
 
-    return modalRoot;
+    document.addEventListener('mousedown', (event) => {
+      if (!overlayRoot || overlayRoot.style.display !== 'block') {
+        return;
+      }
+      if (!overlayRoot.contains(event.target) && !currentInput?.contains(event.target)) {
+        closeOverlay();
+      }
+    }, true);
+
+    window.addEventListener('resize', positionOverlay);
+    window.addEventListener('scroll', positionOverlay, true);
+
+    return overlayRoot;
+  };
+
+  const guessExtension = (name) => {
+    const parts = name.split('.');
+    return parts.length > 1 ? parts.pop().toUpperCase() : 'FILE';
+  };
+
+  const updateCarouselPosition = () => {
+    if (!overlayRoot) {
+      return;
+    }
+
+    const list = overlayRoot.querySelector('.easy-files-list');
+    const cards = Array.from(list.children);
+    const prev = overlayRoot.querySelector('[data-action="prev"]');
+    const next = overlayRoot.querySelector('[data-action="next"]');
+    const maxVisible = 4;
+    const maxOffset = Math.max(0, cards.length - maxVisible);
+    carouselOffset = Math.min(carouselOffset, maxOffset);
+
+    const shift = carouselOffset * 140;
+    list.style.transform = `translateX(${-shift}px)`;
+
+    prev.disabled = carouselOffset === 0;
+    next.disabled = carouselOffset >= maxOffset;
   };
 
   const renderRecentFiles = async () => {
-    const root = ensureModalRoot();
-    const grid = root.querySelector('.easy-files-grid');
+    const root = ensureOverlayRoot();
+    const list = root.querySelector('.easy-files-list');
     const items = await loadRecentFiles();
 
-    grid.innerHTML = '';
+    list.innerHTML = '';
 
     if (!items.length) {
       const empty = document.createElement('div');
       empty.className = 'easy-files-empty';
-      empty.textContent = 'No recent files yet. Pick one from your device and it will show up here.';
-      grid.appendChild(empty);
+      empty.textContent = 'Sem arquivos recentes ainda.';
+      list.appendChild(empty);
+      root.querySelector('[data-action="prev"]').disabled = true;
+      root.querySelector('[data-action="next"]').disabled = true;
       return;
     }
 
@@ -290,10 +365,14 @@
       const card = document.createElement('button');
       card.type = 'button';
       card.className = 'easy-files-card';
+
+      const isImage = typeof item.type === 'string' && item.type.startsWith('image/');
       card.innerHTML = `
-        <span class="easy-files-ext">${extFromName(item.name)}</span>
-        <span class="easy-files-name">${item.name}</span>
-        <span class="easy-files-meta">${humanFileSize(item.size)}</span>
+        ${isImage
+    ? `<img class="easy-files-thumb" src="${item.dataUrl}" alt="${item.name}">`
+    : `<div class="easy-files-fallback">${guessExtension(item.name)}</div>`}
+        <div class="easy-files-name">${item.name}</div>
+        <div class="easy-files-meta">${humanFileSize(item.size)}</div>
       `;
 
       card.addEventListener('click', async () => {
@@ -312,24 +391,58 @@
         transfer.items.add(file);
         currentInput.files = transfer.files;
         currentInput.dispatchEvent(new Event('change', { bubbles: true }));
-        closeModal();
+        closeOverlay();
       });
 
-      grid.appendChild(card);
+      list.appendChild(card);
     });
+
+    updateCarouselPosition();
   };
 
-  const openModalForInput = async (input) => {
-    currentInput = input;
-    await renderRecentFiles();
-    ensureModalRoot().style.display = 'flex';
-  };
-
-  const closeModal = () => {
-    if (!modalRoot) {
+  const positionOverlay = () => {
+    if (!currentInput || !overlayRoot || overlayRoot.style.display !== 'block') {
       return;
     }
-    modalRoot.style.display = 'none';
+
+    const rect = currentInput.getBoundingClientRect();
+    const gap = 10;
+    const panelWidth = Math.min(760, window.innerWidth - 20);
+    let left = rect.left;
+    let top = rect.bottom + gap;
+
+    if (left + panelWidth > window.innerWidth - 10) {
+      left = window.innerWidth - panelWidth - 10;
+    }
+    if (left < 10) {
+      left = 10;
+    }
+
+    const estimatedHeight = 280;
+    if (top + estimatedHeight > window.innerHeight - 10) {
+      top = rect.top - estimatedHeight - gap;
+    }
+    if (top < 10) {
+      top = 10;
+    }
+
+    overlayRoot.style.left = `${left}px`;
+    overlayRoot.style.top = `${top}px`;
+  };
+
+  const openOverlayForInput = async (input) => {
+    currentInput = input;
+    carouselOffset = 0;
+    await renderRecentFiles();
+    ensureOverlayRoot().style.display = 'block';
+    positionOverlay();
+  };
+
+  const closeOverlay = () => {
+    if (!overlayRoot) {
+      return;
+    }
+    overlayRoot.style.display = 'none';
     currentInput = null;
   };
 
@@ -359,7 +472,7 @@
 
     event.preventDefault();
     event.stopPropagation();
-    openModalForInput(input);
+    openOverlayForInput(input);
   }, true);
 
   document.addEventListener('change', (event) => {
