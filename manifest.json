@@ -3,19 +3,32 @@
   "name": "Easy Files",
   "description": "Opera GX-inspired file picker with a dark recent-files pop-up.",
   "version": "1.0.0",
-  "permissions": ["storage"],
-  "host_permissions": ["<all_urls>"],
+  "permissions": [
+    "storage",
+    "clipboardRead"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_start"
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["assets/easy-files-hero.svg"],
-      "matches": ["<all_urls>"]
+      "resources": [
+        "assets/easy-files-hero.svg"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ]
 }

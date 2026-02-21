@@ -7,6 +7,8 @@
   let carouselOffset = 0;
   let transferFeedbackTimer = null;
   let clipboardPreviewFile = null;
+  let clipboardPollingTimer = null;
+  let clipboardSignature = '';
 
   const mergeRecentItems = async (incomingItems) => {
     if (!incomingItems.length) {
@@ -485,6 +487,8 @@
     currentInput.dispatchEvent(new Event('change', { bubbles: true }));
   };
 
+  const fileSignature = (file) => `${file.name}-${file.size}-${file.type}-${file.lastModified}`;
+
   const tryLoadClipboardPreview = async () => {
     if (!navigator.clipboard?.read) {
       return;
@@ -510,6 +514,12 @@
         return;
       }
 
+      const nextSignature = fileSignature(clipboardFile);
+      if (clipboardSignature === nextSignature) {
+        return;
+      }
+
+      clipboardSignature = nextSignature;
       clipboardPreviewFile = clipboardFile;
       updateTransferArea(clipboardFile);
     } catch {
@@ -589,6 +599,7 @@
     await mergeRecentItems(mapped);
     carouselOffset = 0;
     [clipboardPreviewFile] = files;
+    clipboardSignature = fileSignature(files[0]);
     updateTransferArea(files[0], files.length);
     await renderRecentFiles();
   };
@@ -623,22 +634,51 @@
     overlayRoot.style.top = `${top}px`;
   };
 
+  const startClipboardPolling = () => {
+    if (clipboardPollingTimer) {
+      clearInterval(clipboardPollingTimer);
+    }
+
+    clipboardPollingTimer = setInterval(() => {
+      if (!overlayRoot || overlayRoot.style.display !== 'block' || !currentInput) {
+        return;
+      }
+
+      tryLoadClipboardPreview().catch(() => {
+        // Clipboard reads can fail by policy; keep polling quietly.
+      });
+    }, 900);
+  };
+
+  const stopClipboardPolling = () => {
+    if (!clipboardPollingTimer) {
+      return;
+    }
+
+    clearInterval(clipboardPollingTimer);
+    clipboardPollingTimer = null;
+  };
+
   const openOverlayForInput = async (input) => {
     currentInput = input;
     carouselOffset = 0;
     clipboardPreviewFile = null;
+    clipboardSignature = '';
     ensureOverlayRoot();
     updateTransferArea();
     await tryLoadClipboardPreview();
     await renderRecentFiles();
     overlayRoot.style.display = 'block';
     positionOverlay();
+    startClipboardPolling();
   };
 
   const closeOverlay = () => {
     if (!overlayRoot) {
       return;
     }
+
+    stopClipboardPolling();
     overlayRoot.style.display = 'none';
     currentInput = null;
   };

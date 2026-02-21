@@ -6,7 +6,7 @@ A dark-gray, Opera GX-inspired upload helper that opens an anchored overlay (not
 
 - Replaces native file input clicks with an **anchored popover overlay** near the input field.
 - Uses a transfer area + horizontal recent-files strip inspired by Opera GX style.
-- Reads clipboard image previews when opening the overlay so copied images can be clicked directly from the left box.
+- Reads clipboard image previews automatically when opening the overlay so copied images can be clicked directly from the left box (with periodic refresh while open).
 - Stores and displays recent files with quick one-click re-selection.
 - Includes controls for "Mostrar todos os arquivos" and clearing recent files.
 
@@ -20,3 +20,6 @@ A dark-gray, Opera GX-inspired upload helper that opens an anchored overlay (not
 ## Test page
 
 Use any site with file inputs, or open `demo.html` in a browser.
+
+
+> Note: clipboard auto-preview depends on browser permission/policy; this extension requests `clipboardRead`.
