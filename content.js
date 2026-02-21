@@ -5,6 +5,7 @@
   let currentInput = null;
   let overlayRoot = null;
   let carouselOffset = 0;
+  let transferFeedbackTimer = null;
 
   const mergeRecentItems = async (incomingItems) => {
     if (!incomingItems.length) {
@@ -167,6 +168,24 @@
           border-radius: 6px;
           padding: 4px 6px;
           text-align: center;
+          max-width: 112px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .easy-files-drop-count {
+          position: absolute;
+          top: 8px;
+          right: 8px;
+          z-index: 1;
+          font-size: 0.65rem;
+          color: #eef1ff;
+          background: rgba(33, 22, 145, 0.9);
+          border: 1px solid rgba(151, 166, 255, 0.85);
+          border-radius: 999px;
+          padding: 3px 6px;
+          display: none;
         }
 
         .easy-files-right {
@@ -290,6 +309,7 @@
           <div>
             <h3 class="easy-files-transfer-title">Área de Transferência</h3>
             <div class="easy-files-drop" title="Pressione Ctrl+V para colar">
+              <span class="easy-files-drop-count"></span>
               <p class="easy-files-drop-label">Ctrl+V aqui</p>
             </div>
           </div>
@@ -446,16 +466,25 @@
     updateCarouselPosition();
   };
 
-  const updateTransferArea = (file) => {
+  const updateTransferArea = (file, pastedCount = 0) => {
     const drop = overlayRoot?.querySelector('.easy-files-drop');
     if (!drop) {
       return;
     }
 
+    const label = drop.querySelector('.easy-files-drop-label');
+    const counter = drop.querySelector('.easy-files-drop-count');
     const baseUrl = chrome.runtime.getURL('assets/easy-files-hero.svg');
+
     if (!file) {
       drop.style.backgroundImage = `url("${baseUrl}")`;
-      drop.querySelector('.easy-files-drop-label').textContent = 'Ctrl+V aqui';
+      label.textContent = 'Ctrl+V aqui';
+      counter.style.display = 'none';
+      counter.textContent = '';
+      if (transferFeedbackTimer) {
+        clearTimeout(transferFeedbackTimer);
+        transferFeedbackTimer = null;
+      }
       return;
     }
 
@@ -467,7 +496,25 @@
       drop.style.backgroundImage = `url("${baseUrl}")`;
     }
 
-    drop.querySelector('.easy-files-drop-label').textContent = file.name;
+    label.textContent = file.name;
+
+    if (pastedCount > 1) {
+      counter.style.display = 'inline-block';
+      counter.textContent = `+${pastedCount - 1}`;
+
+      if (transferFeedbackTimer) {
+        clearTimeout(transferFeedbackTimer);
+      }
+
+      transferFeedbackTimer = setTimeout(() => {
+        counter.style.display = 'none';
+        counter.textContent = '';
+        transferFeedbackTimer = null;
+      }, 2800);
+    } else {
+      counter.style.display = 'none';
+      counter.textContent = '';
+    }
   };
 
   const handleClipboardPaste = async (event) => {
@@ -490,7 +537,7 @@
     const mapped = await Promise.all(files.map(fileToRecentItem));
     await mergeRecentItems(mapped);
     carouselOffset = 0;
-    updateTransferArea(files[0]);
+    updateTransferArea(files[0], files.length);
     await renderRecentFiles();
   };
 
@@ -547,8 +594,14 @@
       return;
     }
 
-    const mapped = await Promise.all(Array.from(input.files).map(fileToRecentItem));
+    const selectedFiles = Array.from(input.files);
+    const mapped = await Promise.all(selectedFiles.map(fileToRecentItem));
     await mergeRecentItems(mapped);
+
+    if (overlayRoot && overlayRoot.style.display === 'block' && currentInput === input) {
+      updateTransferArea(selectedFiles[0], selectedFiles.length);
+      await renderRecentFiles();
+    }
   };
 
   document.addEventListener('click', (event) => {
