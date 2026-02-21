@@ -6,6 +6,7 @@
   let overlayRoot = null;
   let carouselOffset = 0;
   let transferFeedbackTimer = null;
+  let clipboardPreviewFile = null;
 
   const mergeRecentItems = async (incomingItems) => {
     if (!incomingItems.length) {
@@ -148,6 +149,7 @@
           display: grid;
           place-items: end center;
           position: relative;
+          cursor: pointer;
         }
 
         .easy-files-drop::before {
@@ -308,7 +310,7 @@
         <div class="easy-files-content">
           <div>
             <h3 class="easy-files-transfer-title">Área de Transferência</h3>
-            <div class="easy-files-drop" title="Pressione Ctrl+V para colar">
+            <div class="easy-files-drop" title="Clique para usar o arquivo copiado">
               <span class="easy-files-drop-count"></span>
               <p class="easy-files-drop-label">Ctrl+V aqui</p>
             </div>
@@ -357,6 +359,19 @@
     overlayRoot.querySelector('[data-action="next"]').addEventListener('click', () => {
       carouselOffset += 1;
       updateCarouselPosition();
+    });
+
+    overlayRoot.querySelector('.easy-files-drop').addEventListener('click', async () => {
+      if (!clipboardPreviewFile || !currentInput) {
+        return;
+      }
+
+      await useFileForInput(clipboardPreviewFile);
+      const mapped = await Promise.all([fileToRecentItem(clipboardPreviewFile)]);
+      await mergeRecentItems(mapped);
+      carouselOffset = 0;
+      await renderRecentFiles();
+      closeOverlay();
     });
 
     document.addEventListener('keydown', (event) => {
@@ -442,10 +457,6 @@
       `;
 
       card.addEventListener('click', async () => {
-        if (!currentInput) {
-          return;
-        }
-
         const response = await fetch(item.dataUrl);
         const blob = await response.blob();
         const file = new File([blob], item.name, {
@@ -453,10 +464,7 @@
           lastModified: item.lastModified
         });
 
-        const transfer = new DataTransfer();
-        transfer.items.add(file);
-        currentInput.files = transfer.files;
-        currentInput.dispatchEvent(new Event('change', { bubbles: true }));
+        await useFileForInput(file);
         closeOverlay();
       });
 
@@ -464,6 +472,49 @@
     });
 
     updateCarouselPosition();
+  };
+
+  const useFileForInput = async (file) => {
+    if (!currentInput || !file) {
+      return;
+    }
+
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    currentInput.files = transfer.files;
+    currentInput.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+
+  const tryLoadClipboardPreview = async () => {
+    if (!navigator.clipboard?.read) {
+      return;
+    }
+
+    try {
+      const clipboardItems = await navigator.clipboard.read();
+      let clipboardFile = null;
+
+      for (const item of clipboardItems) {
+        const mime = item.types.find((type) => type.startsWith('image/'));
+        if (!mime) {
+          continue;
+        }
+
+        const blob = await item.getType(mime);
+        const extension = mime.split('/')[1] || 'png';
+        clipboardFile = new File([blob], `clipboard-${Date.now()}.${extension}`, { type: mime });
+        break;
+      }
+
+      if (!clipboardFile) {
+        return;
+      }
+
+      clipboardPreviewFile = clipboardFile;
+      updateTransferArea(clipboardFile);
+    } catch {
+      // Clipboard read may be blocked by browser permissions or site policy.
+    }
   };
 
   const updateTransferArea = (file, pastedCount = 0) => {
@@ -478,7 +529,7 @@
 
     if (!file) {
       drop.style.backgroundImage = `url("${baseUrl}")`;
-      label.textContent = 'Ctrl+V aqui';
+      label.textContent = 'Copie uma imagem';
       counter.style.display = 'none';
       counter.textContent = '';
       if (transferFeedbackTimer) {
@@ -537,6 +588,7 @@
     const mapped = await Promise.all(files.map(fileToRecentItem));
     await mergeRecentItems(mapped);
     carouselOffset = 0;
+    [clipboardPreviewFile] = files;
     updateTransferArea(files[0], files.length);
     await renderRecentFiles();
   };
@@ -574,8 +626,10 @@
   const openOverlayForInput = async (input) => {
     currentInput = input;
     carouselOffset = 0;
+    clipboardPreviewFile = null;
     ensureOverlayRoot();
     updateTransferArea();
+    await tryLoadClipboardPreview();
     await renderRecentFiles();
     overlayRoot.style.display = 'block';
     positionOverlay();
